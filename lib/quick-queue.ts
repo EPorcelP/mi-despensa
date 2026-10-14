@@ -5,7 +5,7 @@ export function applySteps(products: Product[], operations: QuantityOperation[])
   const result = products.map(p=>({...p}));
   for (const op of operations) {
     const p = result.find(p=>p.id===op.productId);
-    if (p) { p.quantity = Math.min(100000,Math.max(0,Math.round((p.quantity+op.delta)*1000)/1000)); if (op.delta>0) p.manual=false; }
+    if (p) { p.quantity = Math.min(100000,Math.max(0,Math.round(p.quantity)+op.delta)); if (op.delta>0) { p.manual=false; p.shoppingOnly=false; } }
   }
   return result;
 }

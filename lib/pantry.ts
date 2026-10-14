@@ -1,6 +1,6 @@
 export const categories = ['Verduras', 'Frutas', 'Conservas', 'Lácteos y huevos', 'Carne y pescado', 'Pasta, arroz y legumbres', 'Café y desayuno', 'Bebidas', 'Limpieza y hogar', 'Otros'];
 export const units = ['unidades', 'latas', 'bricks', 'paquetes', 'packs', 'botellas', 'botes', 'litros', 'kg'];
-export type Product = { id: string; name: string; category: string; quantity: number; unit: string; minimum: number | null; manual: boolean; categoryAutomatic?: boolean; minimumAutomatic?: boolean };
+export type Product = { id: string; name: string; category: string; quantity: number; unit: string; minimum: number | null; manual: boolean; categoryAutomatic?: boolean; minimumAutomatic?: boolean; shoppingOnly?: boolean };
 export type ImportRow = { name: string; quantity: number; unit: string; match: string; category: string; included: boolean; categoryAutomatic?: boolean; source?: string; note?: string; receipt?: { quantity: number; packSize: number; itemUnit: string } };
 export const normalize = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 export function titleCase(name: string) {
@@ -31,11 +31,18 @@ export function prepareProduct(p: Product): Product {
   const categoryAutomatic = p.categoryAutomatic ?? true;
   const category = categoryAutomatic ? (inferCategory(name, p.unit) ?? (categories.includes(p.category) ? p.category : 'Otros')) : p.category;
   const minimumAutomatic = p.minimumAutomatic ?? p.minimum === null;
-  const minimum = minimumAutomatic ? defaultMinimum({ name, category, unit: p.unit }) : p.minimum;
-  return { ...p, name, category, minimum, categoryAutomatic, minimumAutomatic };
+  const rawMinimum = minimumAutomatic ? defaultMinimum({ name, category, unit: p.unit }) : p.minimum;
+  const minimum = rawMinimum === null ? null : Math.round(rawMinimum);
+  const quantity = Math.round(p.quantity);
+  const shoppingOnly = p.shoppingOnly === true && quantity === 0;
+  return { ...p, name, category, quantity, minimum, categoryAutomatic, minimumAutomatic, shoppingOnly };
 }
 export function prepareProducts(products: Product[]) { return products.map(prepareProduct); }
-export function needsPurchase(p: Product) { return p.manual || p.quantity === 0 || (p.minimum !== null && p.quantity <= p.minimum); }
+export function needsPurchase(p: Product) { return p.shoppingOnly || p.manual || p.quantity === 0 || (p.minimum !== null && p.quantity <= p.minimum); }
+export function removeFromSection(products: Product[], id: string, section: 'pantry' | 'shopping'): Product[] {
+  if (section === 'shopping') return products.filter(p => p.id !== id);
+  return products.map(p => p.id === id ? { ...p, quantity: 0, manual: true, shoppingOnly: true } : { ...p });
+}
 
 // Reglas locales para abreviaturas: no consultan una API ni una base de códigos EAN.
 // El nombre original se conserva en la revisión para comprobar cada propuesta.
@@ -74,9 +81,12 @@ export function matchImportProduct(row: ImportRow, product?: Product): ImportRow
   const unit = product?.unit ?? receipt.itemUnit;
   const packed = receipt.packSize > 1 && isPackUnit(unit);
   const compatible = packed || sameUnit(unit, receipt.itemUnit) || normalize(unit) === 'unidades' || (isContainerUnit(unit) && isContainerUnit(receipt.itemUnit));
-  const quantity = compatible ? receipt.quantity * (packed ? 1 : receipt.packSize) : NaN;
+  const proposedQuantity = compatible ? receipt.quantity * (packed ? 1 : receipt.packSize) : NaN;
+  const quantity = Number.isInteger(proposedQuantity) ? proposedQuantity : NaN;
   const note = !compatible
     ? 'Las unidades son diferentes. Escribe la cantidad que añadirás en la unidad de tu despensa.'
+    : !Number.isInteger(proposedQuantity)
+      ? 'El ticket indica una cantidad fraccionada. Escribe cuántos envases o unidades enteras añadirás.'
     : receipt.packSize > 1
       ? `${receipt.quantity} packs × ${receipt.packSize} = ${receipt.quantity * receipt.packSize} unidades. ${packed ? 'Se suman packs completos.' : 'Se suman las unidades interiores.'}`
       : 'Cantidad de la columna CANTIDAD. Revisa el nombre propuesto y el envase.';
@@ -101,7 +111,7 @@ function parseReceiptLine(line: string, products: Product[]): ImportRow {
   // No se unen sabores, tamaños o variedades mediante coincidencias aproximadas.
   const existing = candidates.length === 1 ? candidates[0] : undefined;
   row = matchImportProduct(row, existing);
-  if (!rule) row.note = 'Abreviatura sin reconocer: conservamos el texto del ticket. Revisa producto, cantidad y packs.';
+  if (!rule) row.note = `${row.note} Abreviatura sin reconocer: conservamos el texto del ticket. Revisa producto y packs.`;
   if (rule?.exclude) row.note = 'Producto de limpieza: desmarcado por defecto. Puedes incluirlo si lo guardas en tu despensa.';
   return row;
 }
@@ -118,16 +128,16 @@ export function parseList(text: string, products: Product[]): ImportRow[] {
     const unitMatch = name.match(/^(unidades?|latas?|bricks?|paquetes?|packs?|botellas?|botes?|litros?|kg)\s+(?:de\s+)?(.+)$/i);
     if (unitMatch) { unit = unitMatch[1].toLowerCase(); name = unitMatch[2]; }
     const existing = products.find(p => normalize(p.name) === normalize(name));
-    return { name: titleCase(name), quantity, unit: existing?.unit ?? unit, match: existing?.id ?? '', category: existing?.category ?? inferCategory(name, unit) ?? 'Otros', included: true, categoryAutomatic: existing?.categoryAutomatic ?? true };
+    return { name: titleCase(name), quantity: Number.isInteger(quantity) ? quantity : NaN, unit: existing?.unit ?? unit, match: existing?.id ?? '', category: existing?.category ?? inferCategory(name, unit) ?? 'Otros', included: true, categoryAutomatic: existing?.categoryAutomatic ?? true, ...(!Number.isInteger(quantity) ? {source: line, note: 'Escribe una cantidad entera de envases o unidades antes de guardar.'} : {}) };
   });
 }
 export function applyImport(products: Product[], rows: ImportRow[], newId: () => string): Product[] {
-  const result = products.map(p => ({ ...p }));
+  const result = prepareProducts(products).map(p => ({ ...p }));
   for (const row of rows.filter(r => r.included)) {
     const existing = result.find(p => row.match ? p.id === row.match : normalize(p.name) === normalize(row.name));
-    if (row.receipt && (!Number.isFinite(row.quantity) || row.quantity <= 0)) throw new Error(`Revisa la cantidad de ${row.name}.`);
+    if (!Number.isInteger(row.quantity) || row.quantity <= 0 || row.quantity > 100000) throw new Error(`Revisa la cantidad de ${row.name}: utiliza un número entero.`);
     if (row.receipt && existing && !sameUnit(existing.unit, row.unit)) throw new Error(`Revisa la unidad de ${row.name}: tu despensa cuenta ${existing.unit}.`);
-    if (existing) { existing.quantity = Math.round((existing.quantity + row.quantity) * 1000) / 1000; existing.manual = false; }
+    if (existing) { existing.quantity += row.quantity; existing.manual = false; existing.shoppingOnly = false; }
     else result.push(prepareProduct({ id: newId(), name: row.name.trim(), category: row.category, quantity: row.quantity, unit: row.unit || 'unidades', minimum: null, manual: false, categoryAutomatic: row.categoryAutomatic ?? true }));
   }
   return prepareProducts(result);

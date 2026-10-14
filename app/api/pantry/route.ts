@@ -5,7 +5,7 @@ import { prepareProducts } from '../../../lib/pantry';
 import type { PantrySnapshot } from '../../../lib/quick-queue';
 export const dynamic='force-dynamic';
 export const runtime='nodejs';
-const product=z.object({id:z.string().min(1).max(80),name:z.string().trim().min(1).max(120),category:z.string().min(1).max(80),quantity:z.number().finite().min(0).max(100000),unit:z.string().min(1).max(40),minimum:z.number().finite().min(0).max(100000).nullable(),manual:z.boolean(),categoryAutomatic:z.boolean().optional(),minimumAutomatic:z.boolean().optional()});
+const product=z.object({id:z.string().min(1).max(80),name:z.string().trim().min(1).max(120),category:z.string().min(1).max(80),quantity:z.number().int().min(0).max(100000),unit:z.string().min(1).max(40),minimum:z.number().int().min(0).max(100000).nullable(),manual:z.boolean(),categoryAutomatic:z.boolean().optional(),minimumAutomatic:z.boolean().optional(),shoppingOnly:z.boolean().optional()});
 const payload=z.object({version:z.number().int().nonnegative(),products:z.array(product).max(1000)}).refine(x=>new Set(x.products.map(p=>p.id)).size===x.products.length);
 const quickPayload=z.object({operations:z.array(z.object({operationId:z.string().uuid(),productId:z.string().min(1).max(80),delta:z.union([z.literal(1),z.literal(-1)])})).min(1).max(30)});
 const reply=(data:unknown,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
@@ -19,7 +19,7 @@ export async function PUT(request:Request){
   const denied=await guard(request);if(denied)return denied;
   try{
     const raw=await request.text();if(raw.length>500000)return reply({error:'La lista es demasiado grande.'},413);
-    const input=payload.safeParse(JSON.parse(raw));if(!input.success)return reply({error:'Revisa los nombres y las cantidades. No se ha guardado ningún cambio.'},400);
+    const input=payload.safeParse(JSON.parse(raw));if(!input.success)return reply({error:'Revisa los nombres: las cantidades y los avisos deben ser números enteros. No se ha guardado ningún cambio.'},400);
     const data=await rpc<PantrySnapshot & {conflict?:boolean}>('mdespensa_put',{p_household:household(),p_expected_version:input.data.version,p_products:prepareProducts(input.data.products)});
     if(data.conflict)return reply({error:'La despensa cambió en otra ventana. Se ha recargado; vuelve a hacer este cambio.'},409);
     return reply({...data,products:prepareProducts(data.products)});

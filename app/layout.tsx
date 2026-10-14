@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 export const metadata: Metadata = {
-  title: 'Mi despensa · Lo que tienes, a mano',
+  title: 'Mi Despensa · Lo que tienes, a mano',
   description: 'Tu despensa y tu próxima compra, sin complicaciones.',
   icons: { icon: '/favicon.svg' },
   robots: { index: false, follow: false },
