@@ -1,23 +1,39 @@
 import { cookies } from 'next/headers';
 import { createHmac } from 'node:crypto';
 import { z } from 'zod';
-import { sameOrigin } from '../../../../lib/auth';
-import { COOKIE_NAME,SESSION_SECONDS,createSession,validPassword } from '../../../../lib/session';
+import { sameOrigin } from '../../../../lib/origin';
 import { rpc } from '../../../../lib/database';
+import { createUserTicket,USER_COOKIE,userCookieOptions } from '../../../../lib/user-access';
+import { supabaseAdminFetch } from '../../../../lib/admin-access';
 export const runtime='nodejs';
+const json=(body:object,status:number)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
 export async function POST(request:Request){
-  if(!sameOrigin(request))return Response.json({error:'Petición no permitida.'},{status:403});
-  try{
-    const raw=await request.text();if(raw.length>1000)return Response.json({error:'Revisa la contraseña.'},{status:400});
-    const input=z.object({password:z.string().min(1).max(200)}).safeParse(JSON.parse(raw));
-    if(!input.success)return Response.json({error:'Escribe la contraseña.'},{status:400});
-    const secret=process.env.SESSION_SECRET;if(!secret || secret.length<32)throw new Error('Configuration');
-    const ip=request.headers.get('x-vercel-forwarded-for') || request.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'local';
-    const keyHash=createHmac('sha256',secret).update(ip).digest('hex');
-    const allowed=await rpc<boolean>('mdespensa_login_attempt',{p_key_hash:keyHash});
-    if(!allowed)return Response.json({error:'Demasiados intentos. Vuelve a probar en 15 minutos.'},{status:429});
-    if(!validPassword(input.data.password))return Response.json({error:'La contraseña no es correcta.'},{status:401});
-    (await cookies()).set(COOKIE_NAME,createSession(),{httpOnly:true,secure:process.env.NODE_ENV==='production',sameSite:'lax',path:'/',maxAge:SESSION_SECONDS});
-    return Response.json({ok:true},{headers:{'Cache-Control':'no-store'}});
-  }catch{return Response.json({error:'La despensa no está disponible. Comprueba la configuración y vuelve a intentarlo.'},{status:503});}
+ if(!sameOrigin(request))return json({error:'Petición no permitida'},403);
+ try {
+  const raw=await request.text();if(raw.length>1600)return json({error:'Datos demasiado largos'},400);
+  const parsed=z.object({email:z.string().email().max(254),password:z.string().min(1).max(300)}).safeParse(JSON.parse(raw));
+  if(!parsed.success)return json({error:'Introduce correo y contraseña'},400);
+  const secret=process.env.SESSION_SECRET;
+  if(!secret||secret.length<32)throw new Error('Configuración incorrecta');
+  const ip=request.headers.get('x-vercel-forwarded-for')||request.headers.get('x-forwarded-for')?.split(',')[0].trim()||'local';
+  const hash=createHmac('sha256',secret).update('user:'+ip).digest('hex');
+  if(!await rpc<boolean>('mdespensa_login_attempt',{p_key_hash:hash}))return json({error:'Demasiados intentos. Prueba más tarde.'},429);
+  const base=process.env.SUPABASE_URL,anon=process.env.SUPABASE_ANON_KEY;
+  if(!base||!anon)throw new Error('Faltan variables Supabase');
+  const response=await fetch(new URL('/auth/v1/token?grant_type=password',base),{method:'POST',headers:{'apikey':anon,'Content-Type':'application/json'},body:JSON.stringify(parsed.data),cache:'no-store',signal:AbortSignal.timeout(15000)});
+  if(!response.ok)return json({error:'Correo o contraseña incorrectos'},401);
+  const data=await response.json() as {user?:{id?:string}};
+  const id=data.user?.id;
+  if(!id||!/^[a-f0-9-]{36}$/i.test(id))return json({error:'Cuenta no válida'},403);
+  const profile=await supabaseAdminFetch('/rest/v1/mdespensa_profiles?user_id=eq.'+encodeURIComponent(id)+'&select=user_id,disabled_at&limit=1');
+  if(!profile.ok)throw new Error('No se pudo verificar el perfil');
+  const rows=await profile.json() as {user_id:string;disabled_at:string|null}[];
+  if(rows[0]?.user_id!==id||rows[0]?.disabled_at!==null)return json({error:'Cuenta no autorizada o desactivada'},403);
+  const link=await supabaseAdminFetch('/rest/v1/mdespensa_user_pantries?owner_user_id=eq.'+encodeURIComponent(id)+'&select=household&limit=1');
+  if(!link.ok)throw new Error('No se pudo verificar la despensa');
+  const pantries=await link.json() as {household:string}[];
+  if(!pantries[0]?.household)return json({error:'Cuenta sin despensa asignada'},403);
+  (await cookies()).set(USER_COOKIE,createUserTicket(id),userCookieOptions());
+  return json({ok:true},200);
+ }catch{return json({error:'No se pudo iniciar sesión. Inténtalo de nuevo.'},503);}
 }
