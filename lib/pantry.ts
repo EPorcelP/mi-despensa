@@ -1,4 +1,4 @@
-export const categories = ['Verduras', 'Frutas', 'Conservas', 'Lácteos y huevos', 'Carne y pescado', 'Pasta, arroz y legumbres', 'Café y desayuno', 'Bebidas', 'Limpieza y hogar', 'Otros'];
+export const categories = ['Verduras', 'Frutas', 'Conservas', 'Lácteos y huevos', 'Carne y pescado', 'Pasta, arroz y legumbres', 'Café y desayuno', 'Bebidas', 'Limpieza y hogar', 'Higiene personal', 'Otros'];
 export const units = ['unidades', 'latas', 'bricks', 'paquetes', 'packs', 'botellas', 'botes', 'litros', 'kg'];
 export type Product = { id: string; name: string; category: string; quantity: number; unit: string; minimum: number | null; manual: boolean; categoryAutomatic?: boolean; minimumAutomatic?: boolean; shoppingOnly?: boolean };
 export type ImportRow = { name: string; quantity: number; unit: string; match: string; category: string; included: boolean; categoryAutomatic?: boolean; source?: string; note?: string; receipt?: { quantity: number; packSize: number; itemUnit: string } };
@@ -8,7 +8,9 @@ export function titleCase(name: string) {
 }
 export function inferCategory(name: string, unit = ''): string | null {
   const n = normalize(name);
-  if (/\b(detergente|lavavajillas|lavaplatos|lejia|limpieza|papel|suavizante|champu|gel|jabon|servilletas|bolsas|estropajo)\b/.test(n)) return 'Limpieza y hogar';
+  if (/\b(detergente|lavavajillas|lavaplatos|lejia|limpieza|suavizante|servilletas|bolsas|estropajo|fregasuelos|quitagrasas|lejia|lavadora)\b/.test(n)) return 'Limpieza y hogar';
+  if (/\b(champu|champus|acondicionador|gel|jabon|desodorante|dentifrico|pasta de dientes|cepillo de dientes|enjuague bucal|crema facial|crema corporal|locion corporal|higiene|afeitado|maquinilla|compresas|tampones|protector solar|colonia)\b/.test(n)) return 'Higiene personal';
+  if (/\b(papel higienico|papel de cocina|papel|toallitas)\b/.test(n)) return 'Limpieza y hogar';
   if (/\b(cocacola|coca cola|pepsi|fanta|aquarius|cerveza|mahou|refresco|agua|zumo|vino|bebida|tonica|sprite|nestea)\b/.test(n)) return 'Bebidas';
   if (/\b(cafe|capsulas|nespresso|nescafe|te|infusion|cacao|galletas|cereales|tostadas|pan|desayuno)\b/.test(n)) return 'Café y desayuno';
   if (/\b(leche|yogur|yogures|queso|mozzarella|mantequilla|nata|danone|huevos|huevo)\b/.test(n)) return 'Lácteos y huevos';
@@ -17,7 +19,6 @@ export function inferCategory(name: string, unit = ''): string | null {
   if (/\b(manzanas?|peras?|platanos?|naranjas?|mandarinas?|limones?|fresas?|uvas|kiwis?|fruta|melon|sandia)\b/.test(n)) return 'Frutas';
   if (/\b(arroz|pasta|macarrones|espaguetis|lentejas|garbanzos|alubias|legumbres|harina|aceite|sal|azucar)\b/.test(n)) return 'Pasta, arroz y legumbres';
   if (/\b(pollo|carne|ternera|cerdo|pavo|jamon|pescado|salmon|merluza|bacalao|gambas)\b/.test(n)) return 'Carne y pescado';
-  if (/\b(detergente|lavavajillas|lavaplatos|lejia|limpieza|papel|suavizante|champu|gel|jabon|servilletas|bolsas|estropajo)\b/.test(n)) return 'Limpieza y hogar';
   return null;
 }
 export function defaultMinimum(p: Pick<Product, 'name' | 'category' | 'unit'>): number | null {
