@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sameOrigin } from '../../../../lib/origin';
+import { supabaseAdminFetch } from '../../../../lib/admin-access';
 export const runtime = 'nodejs';
 
 const schema = z.object({
@@ -22,11 +23,21 @@ export async function POST(request: Request) {
       headers, cache: 'no-store', signal: AbortSignal.timeout(15000)
     });
     if (!who.ok) return Response.json({ error: 'El enlace ha caducado. Solicita otro.' }, { status: 401 });
+    const recoveredUser = await who.json() as { id?:string };
+    if(!recoveredUser.id || !/^[a-f0-9-]{36}$/i.test(recoveredUser.id)) return Response.json({error:'Cuenta no válida'}, {status:401});
     const changed = await fetch(new URL('/auth/v1/user', base), {
       method: 'PUT', headers, body: JSON.stringify({ password: parsed.data.password }),
       cache: 'no-store', signal: AbortSignal.timeout(15000)
     });
     if (!changed.ok) return Response.json({ error: 'No se pudo actualizar la contraseña. Solicita otro enlace.' }, { status: 400 });
+    // Invalidar cookies propias de MiDespensa tras el cambio.
+    const profiles = await supabaseAdminFetch('/rest/v1/mdespensa_profiles?user_id=eq.'+encodeURIComponent(recoveredUser.id)+'&select=session_version&limit=1');
+    if(!profiles.ok) throw new Error('Perfil inaccesible');
+    const records = await profiles.json() as {session_version:number}[];
+    if(records.length!==1) throw new Error('Perfil ausente');
+    const ver=records[0].session_version;
+    const rev=await supabaseAdminFetch('/rest/v1/mdespensa_profiles?user_id=eq.'+encodeURIComponent(recoveredUser.id)+'&session_version=eq.'+ver,{method:'PATCH',headers:{'Content-Type':'application/json','Prefer':'return=representation'},body:JSON.stringify({session_version:ver+1})});
+    if(!rev.ok || (await rev.json() as unknown[]).length!==1){console.error('CRÍTICO: recuperación cambiada sin revocación completa');return Response.json({error:'Contraseña actualizada, pero las sesiones anteriores requieren revisión. Contacta con administración.'},{status:503});}
     return Response.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
   } catch { return Response.json({ error: 'No se pudo completar la recuperación' }, { status: 503 }); }
 }

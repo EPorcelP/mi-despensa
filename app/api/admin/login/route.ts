@@ -27,11 +27,12 @@ export async function POST(request: Request) {
     if (!auth.ok) return Response.json({error:'Credenciales incorrectas o acceso no autorizado'}, {status:401});
     const session = await auth.json() as {user?:{id?:string}};
     const id = session.user?.id;
-    if (!id || !await adminProfile(id)) return Response.json({error:'Acceso no autorizado'}, {status:403});
+    const profile = id ? await adminProfile(id) : null;
+    if (!id || !profile) return Response.json({error:'Acceso no autorizado'}, {status:403});
     const jar=await cookies();
     // Entrar como admin también establece la misma identidad para la aplicación.
-    jar.set(USER_COOKIE, createUserTicket(id), userCookieOptions());
-    jar.set(ADMIN_COOKIE, createAdminTicket(id), adminCookieOptions());
+    jar.set(USER_COOKIE, createUserTicket(id,profile.session_version), userCookieOptions());
+    jar.set(ADMIN_COOKIE, createAdminTicket(id,profile.session_version), adminCookieOptions());
     return Response.json({ok:true},{headers:{'Cache-Control':'no-store'}});
   } catch {return Response.json({error:'No se pudo iniciar sesión en administración'}, {status:503});}
 }

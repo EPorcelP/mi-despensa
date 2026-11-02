@@ -10,8 +10,8 @@ function secret() {
   return createHmac('sha256', value).update('MiDespensa/admin/v1').digest();
 }
 function sign(part: string) { return createHmac('sha256', secret()).update(part).digest('base64url'); }
-export function createAdminTicket(userId: string) {
-  const data = Buffer.from(JSON.stringify({ uid: userId, exp: Math.floor(Date.now()/1000)+MAX_AGE })).toString('base64url');
+export function createAdminTicket(userId: string, version: number) {
+  const data = Buffer.from(JSON.stringify({ uid: userId, ver: version, exp: Math.floor(Date.now()/1000)+MAX_AGE })).toString('base64url');
   return `${data}.${sign(data)}`;
 }
 export function adminCookieOptions() {
@@ -28,11 +28,11 @@ export async function supabaseAdminFetch(path: string, options: RequestInit = {}
   if (!key.startsWith('sb_secret_')) headers.set('Authorization', `Bearer ${key}`);
   return fetch(new URL(path, base), { ...options, headers, cache: 'no-store', signal: AbortSignal.timeout(15000) });
 }
-export async function adminProfile(id: string): Promise<{user_id:string; role:string; disabled_at:string|null}|null> {
-  const q = new URLSearchParams({ user_id: `eq.${id}`, select: 'user_id,role,disabled_at', limit: '1' });
+export async function adminProfile(id: string): Promise<{user_id:string; role:string; disabled_at:string|null;session_version:number}|null> {
+  const q = new URLSearchParams({ user_id: `eq.${id}`, select: 'user_id,role,disabled_at,session_version', limit: '1' });
   const res = await supabaseAdminFetch(`/rest/v1/mdespensa_profiles?${q}`);
   if (!res.ok) throw new Error('No se puede consultar el perfil');
-  const rows = await res.json() as {user_id:string;role:string;disabled_at:string|null}[];
+  const rows = await res.json() as {user_id:string;role:string;disabled_at:string|null;session_version:number}[];
   const profile = rows[0];
   return profile?.role === 'admin' && profile.disabled_at === null ? profile : null;
 }
@@ -45,13 +45,15 @@ export async function getAdmin() {
     const expected = Buffer.from(sign(payload), 'base64url');
     const actual = Buffer.from(signature, 'base64url');
     if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
-    const data = JSON.parse(Buffer.from(payload, 'base64url').toString()) as { uid?:unknown; exp?:unknown };
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString()) as { uid?:unknown; exp?:unknown; ver?:unknown };
+    if (!Number.isSafeInteger(data.ver) || (data.ver as number) < 0) return null;
     if (typeof data.uid !== 'string' || !/^[0-9a-f-]{36}$/i.test(data.uid) || typeof data.exp !== 'number' || data.exp <= Date.now()/1000) return null;
     // La sesión de administración solo es válida para el usuario personal actual.
     const { getUser } = await import('./user-access');
     const currentUser = await getUser();
     if (!currentUser || currentUser.id !== data.uid) return null;
-    return await adminProfile(data.uid);
+    const profile = await adminProfile(data.uid);
+    return profile && profile.session_version === data.ver ? profile : null;
   } catch { return null; }
 }
 export async function requireAdmin() { const admin = await getAdmin(); if (!admin) redirect('/admin/login'); return admin; }
