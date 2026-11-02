@@ -47,6 +47,10 @@ export async function getAdmin() {
     if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString()) as { uid?:unknown; exp?:unknown };
     if (typeof data.uid !== 'string' || !/^[0-9a-f-]{36}$/i.test(data.uid) || typeof data.exp !== 'number' || data.exp <= Date.now()/1000) return null;
+    // La sesión de administración solo es válida para el usuario personal actual.
+    const { getUser } = await import('./user-access');
+    const currentUser = await getUser();
+    if (!currentUser || currentUser.id !== data.uid) return null;
     return await adminProfile(data.uid);
   } catch { return null; }
 }

@@ -1,7 +1,8 @@
 import { cookies } from 'next/headers';
 import { z } from 'zod';
 import { sameOrigin } from '../../../../lib/origin';
-import { adminCookieOptions, ADMIN_COOKIE, adminProfile, createAdminTicket, supabaseAdminFetch } from '../../../../lib/admin-access';
+import { adminCookieOptions, ADMIN_COOKIE, adminProfile, createAdminTicket } from '../../../../lib/admin-access';
+import { createUserTicket, USER_COOKIE, userCookieOptions } from '../../../../lib/user-access';
 import { createHmac } from 'node:crypto';
 import { rpc } from '../../../../lib/database';
 export const runtime = 'nodejs';
@@ -27,7 +28,10 @@ export async function POST(request: Request) {
     const session = await auth.json() as {user?:{id?:string}};
     const id = session.user?.id;
     if (!id || !await adminProfile(id)) return Response.json({error:'Acceso no autorizado'}, {status:403});
-    (await cookies()).set(ADMIN_COOKIE,createAdminTicket(id),adminCookieOptions());
+    const jar=await cookies();
+    // Entrar como admin también establece la misma identidad para la aplicación.
+    jar.set(USER_COOKIE, createUserTicket(id), userCookieOptions());
+    jar.set(ADMIN_COOKIE, createAdminTicket(id), adminCookieOptions());
     return Response.json({ok:true},{headers:{'Cache-Control':'no-store'}});
   } catch {return Response.json({error:'No se pudo iniciar sesión en administración'}, {status:503});}
 }

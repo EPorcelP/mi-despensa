@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { sameOrigin } from '../../../../lib/origin';
 import { rpc } from '../../../../lib/database';
 import { createUserTicket,USER_COOKIE,userCookieOptions } from '../../../../lib/user-access';
-import { supabaseAdminFetch } from '../../../../lib/admin-access';
+import { ADMIN_COOKIE, supabaseAdminFetch } from '../../../../lib/admin-access';
 export const runtime='nodejs';
 const json=(body:object,status:number)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
 export async function POST(request:Request){
@@ -33,7 +33,9 @@ export async function POST(request:Request){
   if(!link.ok)throw new Error('No se pudo verificar la despensa');
   const pantries=await link.json() as {household:string}[];
   if(!pantries[0]?.household)return json({error:'Cuenta sin despensa asignada'},403);
-  (await cookies()).set(USER_COOKIE,createUserTicket(id),userCookieOptions());
+  const jar=await cookies();
+  jar.delete(ADMIN_COOKIE);
+  jar.set(USER_COOKIE,createUserTicket(id),userCookieOptions());
   return json({ok:true},200);
  }catch{return json({error:'No se pudo iniciar sesión. Inténtalo de nuevo.'},503);}
 }
